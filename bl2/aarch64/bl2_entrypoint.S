@@ -15,8 +15,8 @@
 
 func bl2_entrypoint
 	/*---------------------------------------------
-	 * Save arguments x0 - x3 from BL1 for future
-	 * use.
+	 * 保存来自BL1的参数x0-x3以供将来使用
+	 * 这些参数包含了BL1传递给BL2的重要信息
 	 * ---------------------------------------------
 	 */
 	mov	x20, x0
@@ -25,7 +25,8 @@ func bl2_entrypoint
 	mov	x23, x3
 
 	/* ---------------------------------------------
-	 * Set the exception vector to something sane.
+	 * 设置异常向量表到一个合理的地址
+	 * early_exceptions是在其他地方定义的异常处理函数
 	 * ---------------------------------------------
 	 */
 	adr	x0, early_exceptions
@@ -33,23 +34,22 @@ func bl2_entrypoint
 	isb
 
 	/* ---------------------------------------------
-	 * Enable the SError interrupt now that the
-	 * exception vectors have been setup.
+	 * 使能SError中断
+	 * 现在异常向量表已经设置完成，可以安全地启用中断
 	 * ---------------------------------------------
 	 */
 	msr	daifclr, #DAIF_ABT_BIT
 
 	/* ---------------------------------------------
-	 * Enable the instruction cache, stack pointer
-	 * and data access alignment checks and disable
-	 * speculative loads.
+	 * 使能指令缓存、栈指针对齐检查和数据访问对齐检查
+	 * 同时禁用推测加载以提高安全性
 	 * ---------------------------------------------
 	 */
 	mov	x1, #(SCTLR_I_BIT | SCTLR_A_BIT | SCTLR_SA_BIT)
 	mrs	x0, sctlr_el1
 	orr	x0, x0, x1
 #if ENABLE_BTI
-	/* Enable PAC branch type compatibility */
+	/* 启用PAC分支类型兼容性 */
 	bic     x0, x0, #(SCTLR_BT0_BIT | SCTLR_BT1_BIT)
 #endif
 	bic	x0, x0, #SCTLR_DSSBS_BIT
@@ -57,12 +57,10 @@ func bl2_entrypoint
 	isb
 
 	/* ---------------------------------------------
-	 * Invalidate the RW memory used by the BL2
-	 * image. This includes the data and NOBITS
-	 * sections. This is done to safeguard against
-	 * possible corruption of this memory by dirty
-	 * cache lines in a system cache as a result of
-	 * use by an earlier boot loader stage.
+	 * 使无效BL2镜像使用的读写内存
+	 * 包括数据段和NOBITS段
+	 * 这样做是为了防止系统缓存中脏缓存行可能造成的内存损坏
+	 * 这些脏缓存行可能是早期引导加载程序阶段使用的结果
 	 * ---------------------------------------------
 	 */
 	adr	x0, __RW_START__
@@ -71,9 +69,9 @@ func bl2_entrypoint
 	bl	inv_dcache_range
 
 	/* ---------------------------------------------
-	 * Zero out NOBITS sections. There are 2 of them:
-	 *   - the .bss section;
-	 *   - the coherent memory section.
+	 * 清零NOBITS段，共有两个：
+	 *   - .bss段；
+	 *   - 一致内存段。
 	 * ---------------------------------------------
 	 */
 	adrp	x0, __BSS_START__
@@ -93,18 +91,15 @@ func bl2_entrypoint
 #endif
 
 	/* --------------------------------------------
-	 * Allocate a stack whose memory will be marked
-	 * as Normal-IS-WBWA when the MMU is enabled.
-	 * There is no risk of reading stale stack
-	 * memory after enabling the MMU as only the
-	 * primary cpu is running at the moment.
+	 * 分配一个栈，当MMU启用时其内存将被标记为Normal-IS-WBWA
+	 * 由于此时只有主CPU在运行，因此启用MMU后读取陈旧栈内存没有风险
 	 * --------------------------------------------
 	 */
 	bl	plat_set_my_stack
 
 	/* ---------------------------------------------
-	 * Initialize the stack protector canary before
-	 * any C code is called.
+	 * 在调用任何C代码之前初始化栈保护器金丝雀值
+	 * 用于检测栈溢出攻击
 	 * ---------------------------------------------
 	 */
 #if STACK_PROTECTOR_ENABLED
@@ -112,24 +107,24 @@ func bl2_entrypoint
 #endif
 
 	/* ---------------------------------------------
-	 * Perform BL2 setup
-	 * ---------------------------------------------
-	 */
+	 * 执行BL2设置
+	 * 恢复之前保存的参数
+	 * ---------------------------------------------*/
 	mov	x0, x20
 	mov	x1, x21
 	mov	x2, x22
 	mov	x3, x23
 
 	/* ---------------------------------------------
-	 * Jump to main function.
-	 * ---------------------------------------------
-	 */
+	 * 跳转到主函数
+	 * 这是BL2的主要逻辑入口点
+	 * ---------------------------------------------*/
 	bl	bl2_main
 
 	/* ---------------------------------------------
-	 * Should never reach this point.
-	 * ---------------------------------------------
-	 */
+	 * 不应该到达这一点
+	 * 如果执行到这里说明出现了严重错误
+	 * ---------------------------------------------*/
 	no_ret	plat_panic_handler
 
 endfunc bl2_entrypoint

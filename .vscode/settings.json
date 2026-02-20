@@ -23,4 +23,7 @@
         "**/node_modules/**": true,
         "build/**": true,
     },
+    "editor.wordWrapColumn": 150,
+    "editor.wordWrap": "off",
+    "editor.mouseWheelZoom": true,
 }

@@ -1,75 +1,102 @@
 /*
- * Copyright (c) 2016-2020, ARM Limited and Contributors. All rights reserved.
+ * 版权所有 (c) 2016-2020, ARM Limited 和贡献者保留所有权利。
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
 #include <assert.h>
 
-#include <arch_helpers.h>
-#include <context.h>
-#include <common/debug.h>
-#include <lib/el3_runtime/context_mgmt.h>
 #include <plat/common/platform.h>
+
+#include <arch_helpers.h>
+#include <common/debug.h>
+#include <context.h>
+#include <lib/el3_runtime/context_mgmt.h>
 #include <smccc_helpers.h>
 
 #include "../bl1_private.h"
 
 /*
- * Following arrays will be used for context management.
- * There are 2 instances, for the Secure and Non-Secure contexts.
+ * 以下数组将用于上下文管理。
+ * 共有2个实例，分别用于安全和非安全上下文。
  */
 static cpu_context_t bl1_cpu_context[2];
 static smc_ctx_t bl1_smc_context[2];
 
-/* Following contains the next cpu context pointer. */
+/* 存储下一个CPU上下文指针 */
 static void *bl1_next_cpu_context_ptr;
 
-/* Following contains the next smc context pointer. */
+/* 存储下一个SMC上下文指针 */
 static void *bl1_next_smc_context_ptr;
 
-/* Following functions are used for SMC context handling */
+/* 以下函数用于SMC上下文处理 */
+/**
+ * 获取指定安全状态的SMC上下文
+ * @param security_state 安全状态(SECURE/NON_SECURE)
+ * @return 指向对应SMC上下文的指针
+ */
 void *smc_get_ctx(unsigned int security_state)
 {
 	assert(sec_state_is_valid(security_state));
 	return &bl1_smc_context[security_state];
 }
 
+/**
+ * 设置下一个要使用的SMC上下文
+ * @param security_state 安全状态(SECURE/NON_SECURE)
+ */
 void smc_set_next_ctx(unsigned int security_state)
 {
 	assert(sec_state_is_valid(security_state));
 	bl1_next_smc_context_ptr = &bl1_smc_context[security_state];
 }
 
+/**
+ * 获取下一个要使用的SMC上下文
+ * @return 指向下一个SMC上下文的指针
+ */
 void *smc_get_next_ctx(void)
 {
 	return bl1_next_smc_context_ptr;
 }
 
-/* Following functions are used for CPU context handling */
+/* 以下函数用于CPU上下文处理 */
+/**
+ * 获取指定安全状态的CPU上下文
+ * @param security_state 安全状态(SECURE/NON_SECURE)
+ * @return 指向对应CPU上下文的指针
+ */
 void *cm_get_context(size_t security_state)
 {
 	assert(sec_state_is_valid(security_state));
 	return &bl1_cpu_context[security_state];
 }
 
+/**
+ * 设置下一个要使用的CPU上下文
+ * @param context 要设置的上下文指针
+ */
 void cm_set_next_context(void *context)
 {
 	assert(context != NULL);
 	bl1_next_cpu_context_ptr = context;
 }
 
+/**
+ * 获取下一个要使用的CPU上下文
+ * @return 指向下一个CPU上下文的指针
+ */
 void *cm_get_next_context(void)
 {
 	return bl1_next_cpu_context_ptr;
 }
 
 /*******************************************************************************
- * Following function copies GP regs r0-r4, lr and spsr,
- * from the CPU context to the SMC context structures.
+ * 以下函数将通用寄存器r0-r4、lr和spsr从CPU上下文复制到SMC上下文结构体中
+ * 这是为了在安全监控调用(SMC)期间保存处理器状态
  ******************************************************************************/
 static void copy_cpu_ctx_to_smc_ctx(const regs_t *cpu_reg_ctx,
-		smc_ctx_t *next_smc_ctx)
+				    smc_ctx_t *next_smc_ctx)
 {
 	next_smc_ctx->r0 = read_ctx_reg(cpu_reg_ctx, CTX_GPREG_R0);
 	next_smc_ctx->r1 = read_ctx_reg(cpu_reg_ctx, CTX_GPREG_R1);
@@ -81,24 +108,26 @@ static void copy_cpu_ctx_to_smc_ctx(const regs_t *cpu_reg_ctx,
 }
 
 /*******************************************************************************
- * Following function flushes the SMC & CPU context pointer and its data.
+ * 以下函数刷新SMC和CPU上下文指针及其数据到内存
+ * 确保在禁用缓存后仍能正确访问这些数据
  ******************************************************************************/
 static void flush_smc_and_cpu_ctx(void)
 {
 	flush_dcache_range((uintptr_t)&bl1_next_smc_context_ptr,
-		sizeof(bl1_next_smc_context_ptr));
+			   sizeof(bl1_next_smc_context_ptr));
 	flush_dcache_range((uintptr_t)bl1_next_smc_context_ptr,
-		sizeof(smc_ctx_t));
+			   sizeof(smc_ctx_t));
 
 	flush_dcache_range((uintptr_t)&bl1_next_cpu_context_ptr,
-		sizeof(bl1_next_cpu_context_ptr));
+			   sizeof(bl1_next_cpu_context_ptr));
 	flush_dcache_range((uintptr_t)bl1_next_cpu_context_ptr,
-		sizeof(cpu_context_t));
+			   sizeof(cpu_context_t));
 }
 
 /*******************************************************************************
- * This function prepares the context for Secure/Normal world images.
- * Normal world images are transitioned to HYP(if supported) else SVC.
+ * 此函数为安全/正常世界镜像准备上下文
+ * 正常世界镜像将转换到HYP模式(如果支持)，否则转换到SVC模式
+ * 这是BL1阶段的重要函数，负责设置下一阶段启动所需的处理器状态
  ******************************************************************************/
 void bl1_prepare_next_image(unsigned int image_id)
 {
@@ -106,48 +135,48 @@ void bl1_prepare_next_image(unsigned int image_id)
 	image_desc_t *desc;
 	entry_point_info_t *next_bl_ep;
 
-	/* Get the image descriptor. */
+	/* 获取镜像描述符 */
 	desc = bl1_plat_get_image_desc(image_id);
 	assert(desc != NULL);
 
-	/* Get the entry point info. */
+	/* 获取入口点信息 */
 	next_bl_ep = &desc->ep_info;
 
-	/* Get the image security state. */
+	/* 获取镜像的安全状态 */
 	security_state = GET_SECURITY_STATE(next_bl_ep->h.attr);
 
-	/* Prepare the SPSR for the next BL image. */
-	if ((security_state != SECURE) && (GET_VIRT_EXT(read_id_pfr1()) != 0U)) {
+	/* 为下一个BL镜像准备SPSR(程序状态寄存器) */
+	if ((security_state != SECURE) &&
+	    (GET_VIRT_EXT(read_id_pfr1()) != 0U)) {
 		mode = MODE32_hyp;
 	}
 
-	next_bl_ep->spsr = SPSR_MODE32(mode, SPSR_T_ARM,
-				SPSR_E_LITTLE, DISABLE_ALL_EXCEPTIONS);
+	next_bl_ep->spsr = SPSR_MODE32(mode, SPSR_T_ARM, SPSR_E_LITTLE,
+				       DISABLE_ALL_EXCEPTIONS);
 
-	/* Allow platform to make change */
+	/* 允许平台进行修改 */
 	bl1_plat_set_ep_info(image_id, next_bl_ep);
 
-	/* Prepare the cpu context for the next BL image. */
+	/* 为下一个BL镜像准备CPU上下文 */
 	cm_init_my_context(next_bl_ep);
 	cm_prepare_el3_exit(security_state);
 	cm_set_next_context(cm_get_context(security_state));
 
-	/* Prepare the smc context for the next BL image. */
+	/* 为下一个BL镜像准备SMC上下文 */
 	smc_set_next_ctx(security_state);
 	copy_cpu_ctx_to_smc_ctx(get_regs_ctx(cm_get_next_context()),
-		smc_get_next_ctx());
+				smc_get_next_ctx());
 
 	/*
-	 * If the next image is non-secure, then we need to program the banked
-	 * non secure sctlr. This is not required when the next image is secure
-	 * because in AArch32, we expect the secure world to have the same
-	 * SCTLR settings.
+	 * 如果下一个镜像是非安全的，则需要编程银行化的非安全SCTLR。
+	 * 当下一个镜像是安全的时候不需要这样做，因为在AArch32中，
+	 * 我们期望安全世界具有相同的SCTLR设置。
 	 */
 	if (security_state == NON_SECURE) {
 		cpu_context_t *ctx = cm_get_context(security_state);
 		u_register_t ns_sctlr;
 
-		/* Temporarily set the NS bit to access NS SCTLR */
+		/* 临时设置NS位以访问非安全SCTLR */
 		write_scr(read_scr() | SCR_NS_BIT);
 		isb();
 
@@ -160,12 +189,12 @@ void bl1_prepare_next_image(unsigned int image_id)
 	}
 
 	/*
-	 * Flush the SMC & CPU context and the (next)pointers,
-	 * to access them after caches are disabled.
+	 * 刷新SMC和CPU上下文以及(下一个)指针，
+	 * 以便在禁用缓存后能够访问它们。
 	 */
 	flush_smc_and_cpu_ctx();
 
-	/* Indicate that image is in execution state. */
+	/* 标记镜像处于执行状态 */
 	desc->state = IMAGE_STATE_EXECUTED;
 
 	print_entry_point_info(next_bl_ep);

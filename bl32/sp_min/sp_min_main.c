@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2025, Arm Limited and Contributors. All rights reserved.
+ * 版权所有 (c) 2016-2025, Arm Limited 及其贡献者。保留所有权利。
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <plat/common/platform.h>
 #include <platform_def.h>
 
 #include <arch.h>
@@ -24,7 +25,6 @@
 #include <lib/psci/psci.h>
 #include <lib/runtime_instr.h>
 #include <lib/utils.h>
-#include <plat/common/platform.h>
 #include <platform_sp_min.h>
 #include <services/std_svc.h>
 #include <smccc_helpers.h>
@@ -32,40 +32,62 @@
 #include "sp_min_private.h"
 
 #if ENABLE_RUNTIME_INSTRUMENTATION
-PMF_REGISTER_SERVICE_SMC(rt_instr_svc, PMF_RT_INSTR_SVC_ID,
-	RT_INSTR_TOTAL_IDS, PMF_STORE_ENABLE)
+PMF_REGISTER_SERVICE_SMC(rt_instr_svc, PMF_RT_INSTR_SVC_ID, RT_INSTR_TOTAL_IDS,
+			 PMF_STORE_ENABLE)
 #endif
 
-/* Pointers to per-core cpu contexts */
+/* 指向每个核心CPU上下文的指针 */
 static void *sp_min_cpu_ctx_ptr[PLATFORM_CORE_COUNT];
 
-/* SP_MIN only stores the non secure smc context */
+/* SP_MIN仅存储非安全SMC上下文 */
 static smc_ctx_t sp_min_smc_context[PLATFORM_CORE_COUNT];
 
 /******************************************************************************
- * Define the smccc helper library APIs
- *****************************************************************************/
+ * 获取指定安全状态下的SMC上下文指针。
+ *
+ * 参数:
+ *   security_state - 安全状态，必须为NON_SECURE。
+ *
+ * 返回值:
+ *   指向当前核心的非安全SMC上下文的指针。
+ ******************************************************************************/
 void *smc_get_ctx(unsigned int security_state)
 {
 	assert(security_state == NON_SECURE);
 	return &sp_min_smc_context[plat_my_core_pos()];
 }
 
+/******************************************************************************
+ * 设置下一个SMC上下文的安全状态。
+ *
+ * 参数:
+ *   security_state - 安全状态，必须为NON_SECURE。
+ ******************************************************************************/
 void smc_set_next_ctx(unsigned int security_state)
 {
 	assert(security_state == NON_SECURE);
-	/* SP_MIN stores only non secure smc context. Nothing to do here */
+	/* SP_MIN仅存储非安全SMC上下文。这里无需执行任何操作 */
 }
 
+/******************************************************************************
+ * 获取下一个SMC上下文的指针。
+ *
+ * 返回值:
+ *   指向当前核心的非安全SMC上下文的指针。
+ ******************************************************************************/
 void *smc_get_next_ctx(void)
 {
 	return &sp_min_smc_context[plat_my_core_pos()];
 }
 
 /*******************************************************************************
- * This function returns a pointer to the most recent 'cpu_context' structure
- * for the calling CPU that was set as the context for the specified security
- * state. NULL is returned if no such structure has been specified.
+ * 获取指定安全状态下调用CPU的最近一次设置的CPU上下文结构体指针。
+ *
+ * 参数:
+ *   security_state - 安全状态，必须为NON_SECURE。
+ *
+ * 返回值:
+ *   指向CPU上下文结构体的指针，如果未设置则返回NULL。
  ******************************************************************************/
 void *cm_get_context(size_t security_state)
 {
@@ -74,8 +96,11 @@ void *cm_get_context(size_t security_state)
 }
 
 /*******************************************************************************
- * This function sets the pointer to the current 'cpu_context' structure for the
- * specified security state for the calling CPU
+ * 为调用CPU设置指定安全状态下的当前CPU上下文结构体指针。
+ *
+ * 参数:
+ *   context - 指向CPU上下文结构体的指针。
+ *   security_state - 安全状态，必须为NON_SECURE。
  ******************************************************************************/
 void cm_set_context(void *context, uint32_t security_state)
 {
@@ -84,31 +109,45 @@ void cm_set_context(void *context, uint32_t security_state)
 }
 
 /*******************************************************************************
- * This function returns a pointer to the most recent 'cpu_context' structure
- * for the CPU identified by `cpu_idx` that was set as the context for the
- * specified security state. NULL is returned if no such structure has been
- * specified.
+ * 获取由CPU索引标识的CPU在指定安全状态下的最近一次设置的CPU上下文结构体指针。
+ *
+ * 参数:
+ *   cpu_idx - CPU索引。
+ *   security_state - 安全状态，必须为NON_SECURE。
+ *
+ * 返回值:
+ *   指向CPU上下文结构体的指针，如果未设置则返回NULL。
  ******************************************************************************/
-void *cm_get_context_by_index(unsigned int cpu_idx,
-				size_t security_state)
+void *cm_get_context_by_index(unsigned int cpu_idx, size_t security_state)
 {
 	assert(security_state == NON_SECURE);
 	return sp_min_cpu_ctx_ptr[cpu_idx];
 }
 
 /*******************************************************************************
- * This function sets the pointer to the current 'cpu_context' structure for the
- * specified security state for the CPU identified by CPU index.
+ * 为由CPU索引标识的CPU设置指定安全状态下的当前CPU上下文结构体指针。
+ *
+ * 参数:
+ *   cpu_idx - CPU索引。
+ *   context - 指向CPU上下文结构体的指针。
+ *   security_state - 安全状态，必须为NON_SECURE。
  ******************************************************************************/
 void cm_set_context_by_index(unsigned int cpu_idx, void *context,
-				unsigned int security_state)
+			     unsigned int security_state)
 {
 	assert(security_state == NON_SECURE);
 	sp_min_cpu_ctx_ptr[cpu_idx] = context;
 }
 
+/******************************************************************************
+ * 将CPU寄存器上下文复制到SMC上下文中。
+ *
+ * 参数:
+ *   cpu_reg_ctx - 指向CPU寄存器上下文的指针。
+ *   next_smc_ctx - 指向目标SMC上下文的指针。
+ ******************************************************************************/
 static void copy_cpu_ctx_to_smc_stx(const regs_t *cpu_reg_ctx,
-				smc_ctx_t *next_smc_ctx)
+				    smc_ctx_t *next_smc_ctx)
 {
 	next_smc_ctx->r0 = read_ctx_reg(cpu_reg_ctx, CTX_GPREG_R0);
 	next_smc_ctx->r1 = read_ctx_reg(cpu_reg_ctx, CTX_GPREG_R1);
@@ -120,9 +159,7 @@ static void copy_cpu_ctx_to_smc_stx(const regs_t *cpu_reg_ctx,
 }
 
 /*******************************************************************************
- * This function invokes the PSCI library interface to initialize the
- * non secure cpu context and copies the relevant cpu context register values
- * to smc context. These registers will get programmed during `smc_exit`.
+ * 调用PSCI库接口初始化非安全CPU上下文，并将相关CPU上下文寄存器值复制到SMC上下文中。
  ******************************************************************************/
 static void sp_min_prepare_next_image_entry(void)
 {
@@ -130,22 +167,21 @@ static void sp_min_prepare_next_image_entry(void)
 	regs_t *gpregs = get_regs_ctx(cm_get_context(NON_SECURE));
 	u_register_t ns_sctlr;
 
-	/* Program system registers to proceed to non-secure */
+	/* 编程系统寄存器以继续到非安全状态 */
 	next_image_info = sp_min_plat_get_bl33_ep_info();
 	assert(next_image_info);
 	assert(NON_SECURE == GET_SECURITY_STATE(next_image_info->h.attr));
 
-	INFO("SP_MIN: Preparing exit to normal world\n");
+	INFO("SP_MIN: 准备退出到正常世界\n");
 	print_entry_point_info(next_image_info);
 
 	psci_prepare_next_non_secure_ctx(next_image_info);
 	smc_set_next_ctx(NON_SECURE);
 
-	/* Copy r0, lr and spsr from cpu context to SMC context */
-	copy_cpu_ctx_to_smc_stx(gpregs,
-			smc_get_next_ctx());
+	/* 将r0、lr和spsr从CPU上下文复制到SMC上下文 */
+	copy_cpu_ctx_to_smc_stx(gpregs, smc_get_next_ctx());
 
-	/* Temporarily set the NS bit to access NS SCTLR */
+	/* 临时设置NS位以访问NS SCTLR */
 	write_scr(read_scr() | SCR_NS_BIT);
 	isb();
 	ns_sctlr = read_ctx_reg(gpregs, CTX_NS_SCTLR);
@@ -157,59 +193,67 @@ static void sp_min_prepare_next_image_entry(void)
 }
 
 /******************************************************************************
- * Implement the ARM Standard Service function to get arguments for a
- * particular service.
- *****************************************************************************/
+ * 实现ARM标准服务函数以获取特定服务的参数。
+ *
+ * 参数:
+ *   svc_mask - 服务掩码，必须为PSCI_FID_MASK。
+ *
+ * 返回值:
+ *   指向PSCI库参数的指针。
+ ******************************************************************************/
 uintptr_t get_arm_std_svc_args(unsigned int svc_mask)
 {
-	/* Setup the arguments for PSCI Library */
+	/* 为PSCI库设置参数 */
 	DEFINE_STATIC_PSCI_LIB_ARGS_V1(psci_args, sp_min_warm_entrypoint);
 
-	/* PSCI is the only ARM Standard Service implemented */
+	/* PSCI是唯一实现的ARM标准服务 */
 	assert(svc_mask == PSCI_FID_MASK);
 
 	return (uintptr_t)&psci_args;
 }
 
 /******************************************************************************
- * The SP_MIN setup function. Calls platforms init functions
- *****************************************************************************/
+ * SP_MIN初始化函数。调用平台初始化函数。
+ *
+ * 参数:
+ *   arg0 - 初始化参数0。
+ *   arg1 - 初始化参数1。
+ *   arg2 - 初始化参数2。
+ *   arg3 - 初始化参数3。
+ ******************************************************************************/
 void sp_min_setup(u_register_t arg0, u_register_t arg1, u_register_t arg2,
 		  u_register_t arg3)
 {
-	/* Enable early console if EARLY_CONSOLE flag is enabled */
+	/* 如果启用了EARLY_CONSOLE标志，则启用早期控制台 */
 	plat_setup_early_console();
 
-	/* Perform early platform-specific setup */
+	/* 执行平台特定的早期设置 */
 	sp_min_early_platform_setup2(arg0, arg1, arg2, arg3);
 	sp_min_plat_arch_setup();
 }
 
 /******************************************************************************
- * The SP_MIN main function. Do the platform and PSCI Library setup. Also
- * initialize the runtime service framework.
- *****************************************************************************/
+ * SP_MIN主函数。执行平台和PSCI库设置，并初始化运行时服务框架。
+ ******************************************************************************/
 void sp_min_main(void)
 {
 	NOTICE("SP_MIN: %s\n", build_version_string);
 	NOTICE("SP_MIN: %s\n", build_message);
 
-	/* Perform the SP_MIN platform setup */
+	/* 执行SP_MIN平台设置 */
 	sp_min_platform_setup();
 
-	/* Initialize the runtime services e.g. psci */
-	INFO("SP_MIN: Initializing runtime services\n");
+	/* 初始化运行时服务，例如PSCI */
+	INFO("SP_MIN: 初始化运行时服务\n");
 	runtime_svc_init();
 
 	/*
-	 * We are ready to enter the next EL. Prepare entry into the image
-	 * corresponding to the desired security state after the next ERET.
+	 * 我们已准备好进入下一个EL。准备在下一次ERET之后进入对应所需安全状态的镜像。
 	 */
 	sp_min_prepare_next_image_entry();
 
 	/*
-	 * Perform any platform specific runtime setup prior to cold boot exit
-	 * from SP_MIN.
+	 * 在从SP_MIN退出冷启动之前执行任何平台特定的运行时设置。
 	 */
 	sp_min_plat_runtime_setup();
 
@@ -218,11 +262,8 @@ void sp_min_main(void)
 }
 
 /******************************************************************************
- * This function is invoked during warm boot. Invoke the PSCI library
- * warm boot entry point which takes care of Architectural and platform setup/
- * restore. Copy the relevant cpu_context register values to smc context which
- * will get programmed during `smc_exit`.
- *****************************************************************************/
+ * 在热启动时调用此函数。调用PSCI库热启动入口点，处理架构和平台设置/恢复。
+ ******************************************************************************/
 void sp_min_warm_boot(void)
 {
 	smc_ctx_t *next_smc_ctx;
@@ -236,10 +277,9 @@ void sp_min_warm_boot(void)
 	next_smc_ctx = smc_get_next_ctx();
 	zeromem(next_smc_ctx, sizeof(smc_ctx_t));
 
-	copy_cpu_ctx_to_smc_stx(gpregs,
-			next_smc_ctx);
+	copy_cpu_ctx_to_smc_stx(gpregs, next_smc_ctx);
 
-	/* Temporarily set the NS bit to access NS SCTLR */
+	/* 临时设置NS位以访问NS SCTLR */
 	write_scr(read_scr() | SCR_NS_BIT);
 	isb();
 	ns_sctlr = read_ctx_reg(gpregs, CTX_NS_SCTLR);
@@ -252,10 +292,8 @@ void sp_min_warm_boot(void)
 
 #if SP_MIN_WITH_SECURE_FIQ
 /******************************************************************************
- * This function is invoked on secure interrupts. By construction of the
- * SP_MIN, secure interrupts can only be handled when core executes in non
- * secure state.
- *****************************************************************************/
+ * 在安全中断发生时调用此函数。仅当核心在非安全状态下执行时才能处理安全中断。
+ ******************************************************************************/
 void sp_min_fiq(void)
 {
 	uint32_t id;

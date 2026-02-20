@@ -26,18 +26,18 @@
 static int disable_auth;
 
 /******************************************************************************
- * API to dynamically disable authentication. Only meant for development
- * systems. This is only invoked if DYN_DISABLE_AUTH is defined.
+ * 动态禁用认证的API接口。仅适用于开发系统。
+ * 仅在定义了DYN_DISABLE_AUTH时才会调用此函数。
  *****************************************************************************/
 void dyn_disable_auth(void)
 {
-	INFO("Disabling authentication of images dynamically\n");
+	INFO("动态禁用镜像认证\n");
 	disable_auth = 1;
 }
 # endif /* DYN_DISABLE_AUTH */
 
 /******************************************************************************
- * Function to determine whether the authentication is disabled dynamically.
+ * 判断认证是否被动态禁用的函数
  *****************************************************************************/
 static int dyn_is_auth_disabled(void)
 {
@@ -49,9 +49,16 @@ static int dyn_is_auth_disabled(void)
 }
 #endif /* TRUSTED_BOARD_BOOT */
 
+/*
+ * 页面对齐函数
+ * 参数:
+ *   value: 需要对齐的值
+ *   dir: 对齐方向(UP向上对齐, DOWN向下对齐)
+ * 返回: 对齐后的值
+ */
 uintptr_t page_align(uintptr_t value, unsigned dir)
 {
-	/* Round up the limit to the next page boundary */
+	/* 向上舍入到下一页边界 */
 	if ((value & PAGE_SIZE_MASK) != 0U) {
 		value &= ~PAGE_SIZE_MASK;
 		if (dir == UP) {
@@ -63,12 +70,12 @@ uintptr_t page_align(uintptr_t value, unsigned dir)
 }
 
 /*******************************************************************************
- * Internal function to load an image at a specific address given
- * an image ID and extents of free memory.
+ * 内部函数，用于在指定地址加载镜像
+ * 给定镜像ID和可用内存范围
  *
- * If the load is successful then the image information is updated.
+ * 如果加载成功，则更新镜像信息
  *
- * Returns 0 on success, a negative error code otherwise.
+ * 成功返回0，失败返回负错误码
  ******************************************************************************/
 static int load_image(unsigned int image_id, image_info_t *image_data)
 {
@@ -85,77 +92,76 @@ static int load_image(unsigned int image_id, image_info_t *image_data)
 
 	image_base = image_data->image_base;
 
-	/* Obtain a reference to the image by querying the platform layer */
+	/* 通过查询平台层获取镜像引用 */
 	io_result = plat_get_image_source(image_id, &dev_handle, &image_spec);
 	if (io_result != 0) {
-		WARN("Failed to obtain reference to image id=%u (%i)\n",
+		WARN("无法获取镜像引用 id=%u (%i)\n",
 			image_id, io_result);
 		return io_result;
 	}
 
-	/* Attempt to access the image */
+	/* 尝试访问镜像 */
 	io_result = io_open(dev_handle, image_spec, &image_handle);
 	if (io_result != 0) {
-		WARN("Failed to access image id=%u (%i)\n",
+		WARN("无法访问镜像 id=%u (%i)\n",
 			image_id, io_result);
 		return io_result;
 	}
 
-	INFO("Loading image id=%u at address 0x%lx\n", image_id, image_base);
+	INFO("正在加载镜像 id=%u 到地址 0x%lx\n", image_id, image_base);
 
-	/* Find the size of the image */
+	/* 查找镜像大小 */
 	io_result = io_size(image_handle, &image_size);
 	if (io_result != 0) {
-		WARN("Failed to determine the size of the image id=%u (%i)\n",
+		WARN("无法确定镜像大小 id=%u (%i)\n",
 			image_id, io_result);
 		goto exit_load_image;
 	}
 
 	if (image_size == 0U) {
-		WARN("image id=%u size is zero\n", image_id);
+		WARN("镜像 id=%u 大小为零\n", image_id);
 		io_result = -EIO;
 		goto exit_load_image;
 	}
 
-	/* Check that the image size to load is within limit */
+	/* 检查要加载的镜像大小是否在限制范围内 */
 	if (image_size > image_data->image_max_size) {
-		WARN("Image id=%u size out of bounds\n", image_id);
+		WARN("镜像 id=%u 大小超出界限\n", image_id);
 		io_result = -EFBIG;
 		goto exit_load_image;
 	}
 
 	/*
-	 * image_data->image_max_size is a uint32_t so image_size will always
-	 * fit in image_data->image_size.
+	 * image_data->image_max_size 是uint32_t类型，所以image_size总是
+	 * 能适应image_data->image_size
 	 */
 	image_data->image_size = (uint32_t)image_size;
 
-	/* We have enough space so load the image now */
-	/* TODO: Consider whether to try to recover/retry a partially successful read */
+	/* 有足够的空间，现在加载镜像 */
+	/* TODO: 考虑是否尝试恢复/重试部分成功的读取 */
 	io_result = io_read(image_handle, image_base, image_size, &bytes_read);
 	if ((io_result != 0) || (bytes_read < image_size)) {
-		WARN("Failed to load image id=%u (%i)\n", image_id, io_result);
+		WARN("无法加载镜像 id=%u (%i)\n", image_id, io_result);
 		goto exit_load_image;
 	}
 
-	INFO("Image id=%u loaded: 0x%lx - 0x%lx\n", image_id, image_base,
+	INFO("镜像 id=%u 已加载: 0x%lx - 0x%lx\n", image_id, image_base,
 	     (uintptr_t)(image_base + image_size));
 
 exit_load_image:
 	(void)io_close(image_handle);
-	/* Ignore improbable/unrecoverable error in 'close' */
+	/* 忽略'close'中不太可能/无法恢复的错误 */
 
-	/* TODO: Consider maintaining open device connection from this bootloader stage */
+	/* TODO: 考虑在此引导加载程序阶段保持设备连接打开 */
 	(void)io_dev_close(dev_handle);
-	/* Ignore improbable/unrecoverable error in 'dev_close' */
+	/* 忽略'dev_close'中不太可能/无法恢复的错误 */
 
 	return io_result;
 }
 
 #if TRUSTED_BOARD_BOOT
 /*
- * This function uses recursion to authenticate the parent images up to the root
- * of trust.
+ * 此函数使用递归来认证父镜像直到信任根
  */
 static int load_auth_image_recursive(unsigned int image_id,
 				    image_info_t *image_data)
@@ -163,7 +169,7 @@ static int load_auth_image_recursive(unsigned int image_id,
 	int rc;
 	unsigned int parent_id;
 
-	/* Use recursion to authenticate parent images */
+	/* 使用递归认证父镜像 */
 	rc = auth_mod_get_parent_id(image_id, &parent_id);
 	if (rc == 0) {
 		rc = load_auth_image_recursive(parent_id, image_data);
@@ -172,18 +178,18 @@ static int load_auth_image_recursive(unsigned int image_id,
 		}
 	}
 
-	/* Load the image */
+	/* 加载镜像 */
 	rc = load_image(image_id, image_data);
 	if (rc != 0) {
 		return rc;
 	}
 
-	/* Authenticate it */
+	/* 认证镜像 */
 	rc = auth_mod_verify_img(image_id,
 				 (void *)image_data->image_base,
 				 image_data->image_size);
 	if (rc != 0) {
-		/* Authentication error, zero memory and flush it right away. */
+		/* 认证错误，清零内存并立即刷新 */
 		zero_normalmem((void *)image_data->image_base,
 			       image_data->image_size);
 		flush_dcache_range(image_data->image_base,
@@ -195,6 +201,9 @@ static int load_auth_image_recursive(unsigned int image_id,
 }
 #endif /* TRUSTED_BOARD_BOOT */
 
+/*
+ * 内部加载认证镜像函数
+ */
 static int load_auth_image_internal(unsigned int image_id,
 				    image_info_t *image_data)
 {
@@ -208,22 +217,23 @@ static int load_auth_image_internal(unsigned int image_id,
 }
 
 /*******************************************************************************
- * Generic function to load and authenticate an image. The image is actually
- * loaded by calling the 'load_image()' function. Therefore, it returns the
- * same error codes if the loading operation failed, or -EAUTH if the
- * authentication failed. In addition, this function uses recursion to
- * authenticate the parent images up to the root of trust (if TBB is enabled).
+ * 通用函数用于加载和认证镜像。实际通过调用'load_image()'函数加载镜像。
+ * 因此，如果加载操作失败，它返回相同的错误码，或者如果认证失败则返回-EAUTH。
+ * 此外，该函数使用递归认证父镜像直到信任根（如果启用了TBB）。
  ******************************************************************************/
 int load_auth_image(unsigned int image_id, image_info_t *image_data)
 {
 	int err;
 
+	/* 检查平台镜像操作函数是否存在 */
 	if ((plat_try_img_ops == NULL) || (plat_try_img_ops->next_instance == NULL)) {
 		err = load_auth_image_internal(image_id, image_data);
 	} else {
+		/* 循环尝试不同实例直到成功 */
 		do {
 			err = load_auth_image_internal(image_id, image_data);
 			if (err != 0) {
+				/* 如果当前实例失败，尝试下一个实例 */
 				if (plat_try_img_ops->next_instance(image_id) != 0) {
 					return err;
 				}
@@ -231,11 +241,11 @@ int load_auth_image(unsigned int image_id, image_info_t *image_data)
 		} while (err != 0);
 	}
 
+	/* 如果加载成功（在可信启动流程中还包括认证） */
 	if (err == 0) {
 		/*
-		 * If loading of the image gets passed (along with its
-		 * authentication in case of Trusted-Boot flow) then measure
-		 * it (if MEASURED_BOOT flag is enabled).
+		 * 如果镜像加载成功（以及在可信启动流程中的认证），
+		 * 则对其进行测量（如果启用了MEASURED_BOOT标志）
 		 */
 		err = plat_mboot_measure_image(image_id, image_data);
 		if (err != 0) {
@@ -243,8 +253,8 @@ int load_auth_image(unsigned int image_id, image_info_t *image_data)
 		}
 
 		/*
-		 * Flush the image to main memory so that it can be executed
-		 * later by any CPU, regardless of cache and MMU state.
+		 * 将镜像刷新到主内存，以便后续任何CPU都可以执行它，
+		 * 无论缓存和MMU状态如何
 		 */
 		flush_dcache_range(image_data->image_base,
 				   image_data->image_size);
@@ -254,15 +264,15 @@ int load_auth_image(unsigned int image_id, image_info_t *image_data)
 }
 
 /*******************************************************************************
- * Print the content of an entry_point_info_t structure.
+ * 打印entry_point_info_t结构体的内容
  ******************************************************************************/
 void print_entry_point_info(const entry_point_info_t *ep_info)
 {
-	INFO("Entry point address = 0x%lx\n", ep_info->pc);
+	INFO("入口点地址 = 0x%lx\n", ep_info->pc);
 	INFO("SPSR = 0x%x\n", ep_info->spsr);
 
 #define PRINT_IMAGE_ARG(n)					\
-	VERBOSE("Argument #" #n " = 0x%llx\n",			\
+	VERBOSE("参数 #" #n " = 0x%llx\n",			\
 		(unsigned long long) ep_info->args.arg##n)
 
 	PRINT_IMAGE_ARG(0);
@@ -279,7 +289,7 @@ void print_entry_point_info(const entry_point_info_t *ep_info)
 }
 
 /*
- * This function is for returning the TF-A version
+ * 此函数用于返回TF-A版本
  */
 const char *get_version(void)
 {

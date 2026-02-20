@@ -1,75 +1,70 @@
 /*
- * Copyright (c) 2018, ARM Limited and Contributors. All rights reserved.
+ * 版权所有 (c) 2018, ARM Limited and Contributors。保留所有权利。
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
 #include <asm_macros.S>
 
-	.globl	wa_cve_2017_5715_icache_inv_vbar
+    .globl	wa_cve_2017_5715_icache_inv_vbar
 
 vector_base wa_cve_2017_5715_icache_inv_vbar
-	/* We encode the exception entry in the bottom 3 bits of SP */
-	add	sp, sp, #1	/* Reset: 0b111 */
-	add	sp, sp, #1	/* Undef: 0b110 */
-	add	sp, sp, #1	/* Syscall: 0b101 */
-	add	sp, sp, #1	/* Prefetch abort: 0b100 */
-	add	sp, sp, #1	/* Data abort: 0b011 */
-	add	sp, sp, #1	/* Reserved: 0b010 */
-	add	sp, sp, #1	/* IRQ: 0b001 */
-	nop			/* FIQ: 0b000 */
+    /* 我们在 SP 的最低 3 位编码异常入口 */
+    add	sp, sp, #1	/* 复位: 0b111 */
+    add	sp, sp, #1	/* 未定义: 0b110 */
+    add	sp, sp, #1	/* 系统调用: 0b101 */
+    add	sp, sp, #1	/* 预取异常: 0b100 */
+    add	sp, sp, #1	/* 数据异常: 0b011 */
+    add	sp, sp, #1	/* 保留: 0b010 */
+    add	sp, sp, #1	/* IRQ: 0b001 */
+    nop			/* FIQ: 0b000 */
 
-	/*
-	 * Invalidate the instruction cache, which we assume also
-	 * invalidates the branch predictor.  This may depend on
-	 * other CPU specific changes (e.g. an ACTLR setting).
-	 */
-	stcopr	r0, ICIALLU
-	isb
+    /*
+     * 使指令缓存失效，假定这也会使分支预测器失效。
+     * 具体行为可能依赖于其他 CPU 特定设置（例如 ACTLR）。
+     */
+    stcopr	r0, ICIALLU
+    isb
 
-	/*
-	 * As we cannot use any temporary registers and cannot
-	 * clobber SP, we can decode the exception entry using
-	 * an unrolled binary search.
-	 *
-	 * Note, if this code is re-used by other secure payloads,
-	 * the below exception entry vectors must be changed to
-	 * the vectors specific to that secure payload.
-	 */
+    /*
+     * 由于不能使用临时寄存器且不能修改 SP，我们通过展开的二分查找来解码异常入口。
+     *
+     * 注意：如果此代码被其他安全负载复用，下方的异常入口向量必须改为对应安全负载的向量。
+     */
 
-	tst	sp, #4
-	bne	1f
+    tst	sp, #4
+    bne	1f
 
-	tst	sp, #2
-	bne	3f
+    tst	sp, #2
+    bne	3f
 
-	/* Expected encoding: 0x1 and 0x0 */
-	tst	sp, #1
-	/* Restore original value of SP by clearing the bottom 3 bits */
-	bic	sp, sp, #0x7
-	bne	plat_panic_handler	/* IRQ */
-	b	sp_min_handle_fiq	/* FIQ */
+    /* 期望编码：0x1 和 0x0 */
+    tst	sp, #1
+    /* 通过清除最低 3 位恢复 SP 的原始值 */
+    bic	sp, sp, #0x7
+    bne	plat_panic_handler	/* IRQ（普通中断） */
+    b	sp_min_handle_fiq	/* FIQ（快速中断） */
 
 1:
-	/* Expected encoding: 0x4 and 0x5 */
-	tst	sp, #2
-	bne	2f
+    /* 期望编码：0x4 和 0x5 */
+    tst	sp, #2
+    bne	2f
 
-	tst	sp, #1
-	bic	sp, sp, #0x7
-	bne	sp_min_handle_smc	/* Syscall */
-	b	plat_panic_handler	/* Prefetch abort */
+    tst	sp, #1
+    bic	sp, sp, #0x7
+    bne	sp_min_handle_smc	/* 系统调用 */
+    b	plat_panic_handler	/* 预取异常 */
 
 2:
-	/* Expected encoding: 0x7 and 0x6 */
-	tst	sp, #1
-	bic	sp, sp, #0x7
-	bne	sp_min_entrypoint	/* Reset */
-	b	plat_panic_handler	/* Undef */
+    /* 期望编码：0x7 和 0x6 */
+    tst	sp, #1
+    bic	sp, sp, #0x7
+    bne	sp_min_entrypoint	/* 复位 */
+    b	plat_panic_handler	/* 未定义 */
 
 3:
-	/* Expected encoding: 0x2 and 0x3 */
-	tst	sp, #1
-	bic	sp, sp, #0x7
-	bne	plat_panic_handler	/* Data abort */
-	b	plat_panic_handler	/* Reserved */
+    /* 期望编码：0x2 和 0x3 */
+    tst	sp, #1
+    bic	sp, sp, #0x7
+    bne	plat_panic_handler	/* 数据异常 */
+    b	plat_panic_handler	/* 保留 */

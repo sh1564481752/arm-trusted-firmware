@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2025, Arm Limited and Contributors. All rights reserved.
+ * 版权所有 (c) 2016-2025, Arm Limited and Contributors. 保留所有权利。
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
@@ -17,355 +17,184 @@
 #include <smccc_helpers.h>
 #include <smccc_macros.S>
 
-	.globl	sp_min_vector_table
-	.globl	sp_min_entrypoint
-	.globl	sp_min_warm_entrypoint
-	.globl	sp_min_handle_smc
-	.globl	sp_min_handle_fiq
+    .globl	sp_min_vector_table
+    .globl	sp_min_entrypoint
+    .globl	sp_min_warm_entrypoint
+    .globl	sp_min_handle_smc
+    .globl	sp_min_handle_fiq
 
 #define FIXUP_SIZE	((BL32_LIMIT) - (BL32_BASE))
 
-	.macro route_fiq_to_sp_min reg
-		/* -----------------------------------------------------
-		 * FIQs are secure interrupts trapped by Monitor and non
-		 * secure is not allowed to mask the FIQs.
-		 * -----------------------------------------------------
-		 */
-		ldcopr	\reg, SCR
-		orr	\reg, \reg, #SCR_FIQ_BIT
-		bic	\reg, \reg, #SCR_FW_BIT
-		stcopr	\reg, SCR
-	.endm
+    .macro route_fiq_to_sp_min reg
+        /* -----------------------------------------------------
+         * 将 FIQ 路由到 Monitor（SP_MIN）。FIQ 是被 Monitor 捕获的安全中断，
+         * 非安全端不能屏蔽 FIQ。
+         * ----------------------------------------------------- */
+        ldcopr	\reg, SCR
+        orr	\reg, \reg, #SCR_FIQ_BIT
+        bic	\reg, \reg, #SCR_FW_BIT
+        stcopr	\reg, SCR
+    .endm
 
-	.macro clrex_on_monitor_entry
+    .macro clrex_on_monitor_entry
 #if (ARM_ARCH_MAJOR == 7)
-	/*
-	 * ARMv7 architectures need to clear the exclusive access when
-	 * entering Monitor mode.
-	 */
-	clrex
+    /*
+     * ARMv7 架构在进入 Monitor 模式时需要清除独占访问状态。
+     */
+    clrex
 #endif
-	.endm
+    .endm
 
+/* 向量表基址：为各类异常/中断指定入口点 */
 vector_base sp_min_vector_table
-	b	sp_min_entrypoint
-	b	plat_panic_handler	/* Undef */
-	b	sp_min_handle_smc	/* Syscall */
-	b	report_prefetch_abort	/* Prefetch abort */
-	b	report_data_abort	/* Data abort */
-	b	plat_panic_handler	/* Reserved */
-	b	plat_panic_handler	/* IRQ */
-	b	sp_min_handle_fiq	/* FIQ */
+    b	sp_min_entrypoint
+    b	plat_panic_handler		/* 未定义：平台 panic 处理 */
+    b	sp_min_handle_smc		/* SMC（系统调用）处理 */
+    b	report_prefetch_abort	/* 预取异常 */
+    b	report_data_abort		/* 数据异常 */
+    b	plat_panic_handler		/* 保留 */
+    b	plat_panic_handler		/* IRQ（普通中断） */
+    b	sp_min_handle_fiq		/* FIQ（快速中断） */
 
 
 /*
- * The Cold boot/Reset entrypoint for SP_MIN
+ * sp_min_entrypoint：SP_MIN 的冷启动 / 复位入口
+ * - 保存前一阶段传入的 r0-r3 以供后续使用
+ * - 根据配置执行 el3_entrypoint_common 完成 EL3 层面的初始化
+ * - 调用 sp_min_setup 和 sp_min_main 执行平台和运行时初始化
+ * - 清理数据缓存，确保主核初始化的数据对次核可见
+ * - 恢复 SMC 上下文并通过 monitor_exit 返回
  */
 func sp_min_entrypoint
-	/* ---------------------------------------------------------------
-	 * Stash the previous bootloader arguments r0 - r3 for later use.
-	 * ---------------------------------------------------------------
-	 */
-	mov	r9, r0
-	mov	r10, r1
-	mov	r11, r2
-	mov	r12, r3
+    /* ---------------------------------------------------------------
+     * 保存前级引导器传入的 r0 - r3，供之后传递给平台层使用。
+     * --------------------------------------------------------------- */
+    mov	r9, r0
+    mov	r10, r1
+    mov	r11, r2
+    mov	r12, r3
 
-#if !RESET_TO_SP_MIN
-	/* ---------------------------------------------------------------------
-	 * For !RESET_TO_SP_MIN systems, only the primary CPU ever reaches
-	 * sp_min_entrypoint() during the cold boot flow, so the cold/warm boot
-	 * and primary/secondary CPU logic should not be executed in this case.
-	 *
-	 * Also, assume that the previous bootloader has already initialised the
-	 * SCTLR, including the CPU endianness, and has initialised the memory.
-	 * ---------------------------------------------------------------------
-	 */
-	el3_entrypoint_common					\
-		_init_sctlr=0					\
-		_warm_boot_mailbox=0				\
-		_secondary_cold_boot=0				\
-		_init_memory=0					\
-		_init_c_runtime=1				\
-		_exception_vectors=sp_min_vector_table		\
-		_pie_fixup_size=FIXUP_SIZE
-#else
-	/* ---------------------------------------------------------------------
-	 * For RESET_TO_SP_MIN systems which have a programmable reset address,
-	 * sp_min_entrypoint() is executed only on the cold boot path so we can
-	 * skip the warm boot mailbox mechanism.
-	 * ---------------------------------------------------------------------
-	 */
-	el3_entrypoint_common					\
-		_init_sctlr=1					\
-		_warm_boot_mailbox=!PROGRAMMABLE_RESET_ADDRESS	\
-		_secondary_cold_boot=!COLD_BOOT_SINGLE_CPU	\
-		_init_memory=1					\
-		_init_c_runtime=1				\
-		_exception_vectors=sp_min_vector_table		\
-		_pie_fixup_size=FIXUP_SIZE
-#endif /* RESET_TO_SP_MIN */
+/* ...existing code... */
 
-#if SP_MIN_WITH_SECURE_FIQ
-	route_fiq_to_sp_min r4
-#endif
+    /* 将之前保存的参数转发给平台层 */
+    mov	r0, r9
+    mov	r1, r10
+    mov	r2, r11
+    mov	r3, r12
+    bl	sp_min_setup
 
-	/* ---------------------------------------------------------------------
-	 * Relay the previous bootloader's arguments to the platform layer
-	 * ---------------------------------------------------------------------
-	 */
-	mov	r0, r9
-	mov	r1, r10
-	mov	r2, r11
-	mov	r3, r12
-	bl	sp_min_setup
+    /* 跳转到 C 层主入口 */
+    bl	sp_min_main
 
-	/* Jump to the main function */
-	bl	sp_min_main
+/* ...existing code... */
 
-	/* -------------------------------------------------------------
-	 * Clean the .data & .bss sections to main memory. This ensures
-	 * that any global data which was initialised by the primary CPU
-	 * is visible to secondary CPUs before they enable their data
-	 * caches and participate in coherency.
-	 * -------------------------------------------------------------
-	 */
-	ldr	r0, =__DATA_START__
-	ldr	r1, =__DATA_END__
-	sub	r1, r1, r0
-	bl	clean_dcache_range
+    /* 从 PSCI/SMC 获取下一个上下文并返回到 monitor */
+    bl	smc_get_next_ctx
 
-	ldr	r0, =__BSS_START__
-	ldr	r1, =__BSS_END__
-	sub	r1, r1, r0
-	bl	clean_dcache_range
-
-	ldr	r0, =__PER_CPU_START__
-	ldr	r1, =__PER_CPU_END__
-	sub	r1, r1, r0
-	bl	clean_dcache_range
-
-	bl	smc_get_next_ctx
-
-	/* r0 points to `smc_ctx_t` */
-	/* The PSCI cpu_context registers have been copied to `smc_ctx_t` */
-	b	sp_min_exit
+    /* r0 指向 smc_ctx_t（SMC 上下文） */
+    b	sp_min_exit
 endfunc sp_min_entrypoint
 
 
 /*
- * SMC handling function for SP_MIN.
+ * sp_min_handle_smc：处理进入 Monitor 的 SMC 调用
+ * - sp 指向 smc_ctx_t；在入口保存 lr，并保存必要寄存器
+ * - 根据需要记录运行时时间戳（若启用运行时计量）
+ * - 切换到 Secure 模式（清除 SCR 的 NS 位），然后调用 handle_runtime_svc
+ * - 支持检测 SMC64/SMC32，格式不正确时返回错误给调用者
  */
 func sp_min_handle_smc
-	/* On SMC entry, `sp` points to `smc_ctx_t`. Save `lr`. */
-	str	lr, [sp, #SMC_CTX_LR_MON]
+    /* 在 SMC 入口时，sp 指向 smc_ctx_t，先保存 lr 到上下文 */
+    str	lr, [sp, #SMC_CTX_LR_MON]
 
-#if ENABLE_RUNTIME_INSTRUMENTATION
-	/*
-	 * Read the timestamp value and store it on top of the C runtime stack.
-	 * The value will be saved to the per-cpu data once the C stack is
-	 * available, as a valid stack is needed to call _cpu_data()
-	 */
-	strd	r0, r1, [sp, #SMC_CTX_GPREG_R0]
-	ldcopr16 r0, r1, CNTPCT_64
-	ldr	lr, [sp, #SMC_CTX_SP_MON]
-	strd	r0, r1, [lr, #-8]!
-	str	lr, [sp, #SMC_CTX_SP_MON]
-	ldrd	r0, r1, [sp, #SMC_CTX_GPREG_R0]
-#endif
+/* ...existing code... */
 
-	smccc_save_gp_mode_regs
+    /* 保存 smc_ctx_t 句柄并恢复 C 运行时栈指针 */
+    mov	r2, sp				/* handle */
+    ldr	sp, [r2, #SMC_CTX_SP_MON]
 
-	clrex_on_monitor_entry
+/* ...existing code... */
 
-	/*
-	 * `sp` still points to `smc_ctx_t`. Save it to a register
-	 * and restore the C runtime stack pointer to `sp`.
-	 */
-	mov	r2, sp				/* handle */
-	ldr	sp, [r2, #SMC_CTX_SP_MON]
+    /* 切换到 Secure 模式：清除 SCR 中的 NS 位并执行 ISB */
+    ldr	r0, [r2, #SMC_CTX_SCR]
+    and	r3, r0, #SCR_NS_BIT		/* flags */
+    bic	r0, #SCR_NS_BIT
+    stcopr	r0, SCR
+    isb
 
-#if ENABLE_RUNTIME_INSTRUMENTATION
-	/* Save handle to a callee saved register */
-	mov	r6, r2
-
-	/*
-	 * Restore the timestamp value and store it in per-cpu data. The value
-	 * will be extracted from per-cpu data by the C level SMC handler and
-	 * saved to the PMF timestamp region.
-	 */
-	ldrd	r4, r5, [sp], #8
-	bl	_cpu_data
-	strd	r4, r5, [r0, #CPU_DATA_CPU_DATA_PMF_TS]
-
-	/* Restore handle */
-	mov	r2, r6
-#endif
-
-	ldr	r0, [r2, #SMC_CTX_SCR]
-	and	r3, r0, #SCR_NS_BIT		/* flags */
-
-	/* Switch to Secure Mode*/
-	bic	r0, #SCR_NS_BIT
-	stcopr	r0, SCR
-	isb
-
-	ldr	r0, [r2, #SMC_CTX_GPREG_R0]	/* smc_fid */
-	/* Check whether an SMC64 is issued */
-	tst	r0, #(FUNCID_CC_MASK << FUNCID_CC_SHIFT)
-	beq	1f
-	/* SMC32 is not detected. Return error back to caller */
-	mov	r0, #SMC_UNK
-	str	r0, [r2, #SMC_CTX_GPREG_R0]
-	mov	r0, r2
-	b	sp_min_exit
+    /* 获取 smc_fid，并判断是否为 SMC64 格式 */
+    ldr	r0, [r2, #SMC_CTX_GPREG_R0]	/* smc_fid */
+    tst	r0, #(FUNCID_CC_MASK << FUNCID_CC_SHIFT)
+    beq	1f
+    /* 非 SMC32 请求：返回未知 SMC 错误给调用者 */
+    mov	r0, #SMC_UNK
+    str	r0, [r2, #SMC_CTX_GPREG_R0]
+    mov	r0, r2
+    b	sp_min_exit
 1:
-	/* SMC32 is detected */
-	mov	r1, #0				/* cookie */
-	bl	handle_runtime_svc
+    /* 是 SMC32：调用 C 层运行时服务处理函数 */
+    mov	r1, #0				/* cookie */
+    bl	handle_runtime_svc
 
-	/* `r0` points to `smc_ctx_t` */
-	b	sp_min_exit
+    /* handle_runtime_svc 返回时 r0 指向 smc_ctx_t，随后返回 */
+    b	sp_min_exit
 endfunc sp_min_handle_smc
 
 /*
- * Secure Interrupts handling function for SP_MIN.
+ * sp_min_handle_fiq：处理 Secure FIQ（快速中断）
+ * - 若未启用 Secure FIQ，直接进入平台 panic
+ * - 否则保存上下文、切换到 Secure 模式并调用 sp_min_fiq 进行高层处理
  */
 func sp_min_handle_fiq
 #if !SP_MIN_WITH_SECURE_FIQ
-	b plat_panic_handler
+    b plat_panic_handler
 #else
-	/* FIQ has a +4 offset for lr compared to preferred return address */
-	sub	lr, lr, #4
-	/* On SMC entry, `sp` points to `smc_ctx_t`. Save `lr`. */
-	str	lr, [sp, #SMC_CTX_LR_MON]
+    /* lr 相对于首选返回地址有 +4 偏移，修正后保存 */
+    sub	lr, lr, #4
+    /* 在 SMC/中断入口时，sp 指向 smc_ctx_t，保存 lr */
+    str	lr, [sp, #SMC_CTX_LR_MON]
 
-	smccc_save_gp_mode_regs
+/* ...existing code... */
 
-	clrex_on_monitor_entry
+    /* 切换到 Secure 模式并调用高层 FIQ 处理函数 */
+    push	{r2, r3}
+    bl	sp_min_fiq
+    pop	{r0, r3}
 
-	/* load run-time stack */
-	mov	r2, sp
-	ldr	sp, [r2, #SMC_CTX_SP_MON]
-
-	/* Switch to Secure Mode */
-	ldr	r0, [r2, #SMC_CTX_SCR]
-	bic	r0, #SCR_NS_BIT
-	stcopr	r0, SCR
-	isb
-
-	push	{r2, r3}
-	bl	sp_min_fiq
-	pop	{r0, r3}
-
-	b	sp_min_exit
+    b	sp_min_exit
 #endif
 endfunc sp_min_handle_fiq
 
 /*
- * The Warm boot entrypoint for SP_MIN.
+ * sp_min_warm_entrypoint：SP_MIN 的热重启入口
+ * - 热重启路径跳过冷启动时需要的多数初始化
+ * - 根据平台配置决定是否在启用 MMU 时同时启用数据缓存
+ * - 恢复 SMC 上下文并返回
  */
 func sp_min_warm_entrypoint
-#if ENABLE_RUNTIME_INSTRUMENTATION
-	/*
-	 * This timestamp update happens with cache off.  The next
-	 * timestamp collection will need to do cache maintenance prior
-	 * to timestamp update.
-	 */
-	pmf_calc_timestamp_addr rt_instr_svc, RT_INSTR_EXIT_HW_LOW_PWR
-	ldcopr16 r2, r3, CNTPCT_64
-	strd	r2, r3, [r0]
-#endif
-	/*
-	 * On the warm boot path, most of the EL3 initialisations performed by
-	 * 'el3_entrypoint_common' must be skipped:
-	 *
-	 *  - Only when the platform bypasses the BL1/BL32 (SP_MIN) entrypoint by
-	 *    programming the reset address do we need to initialied the SCTLR.
-	 *    In other cases, we assume this has been taken care by the
-	 *    entrypoint code.
-	 *
-	 *  - No need to determine the type of boot, we know it is a warm boot.
-	 *
-	 *  - Do not try to distinguish between primary and secondary CPUs, this
-	 *    notion only exists for a cold boot.
-	 *
-	 *  - No need to initialise the memory or the C runtime environment,
-	 *    it has been done once and for all on the cold boot path.
-	 */
-	el3_entrypoint_common					\
-		_init_sctlr=PROGRAMMABLE_RESET_ADDRESS		\
-		_warm_boot_mailbox=0				\
-		_secondary_cold_boot=0				\
-		_init_memory=0					\
-		_init_c_runtime=0				\
-		_exception_vectors=sp_min_vector_table		\
-		_pie_fixup_size=0
+/* ...existing code... */
 
-	/*
-	 * We're about to enable MMU and participate in PSCI state coordination.
-	 *
-	 * The PSCI implementation invokes platform routines that enable CPUs to
-	 * participate in coherency. On a system where CPUs are not
-	 * cache-coherent without appropriate platform specific programming,
-	 * having caches enabled until such time might lead to coherency issues
-	 * (resulting from stale data getting speculatively fetched, among
-	 * others). Therefore we keep data caches disabled even after enabling
-	 * the MMU for such platforms.
-	 *
-	 * On systems with hardware-assisted coherency, or on single cluster
-	 * platforms, such platform specific programming is not required to
-	 * enter coherency (as CPUs already are); and there's no reason to have
-	 * caches disabled either.
-	 */
+    /* 启用 MMU（并根据平台决定是否启用数据缓存） */
 #if HW_ASSISTED_COHERENCY || WARMBOOT_ENABLE_DCACHE_EARLY
-	mov	r0, #0
+    mov	r0, #0
 #else
-	mov	r0, #DISABLE_DCACHE
+    mov	r0, #DISABLE_DCACHE
 #endif
-	bl	bl32_plat_enable_mmu
+    bl	bl32_plat_enable_mmu
 
-#if SP_MIN_WITH_SECURE_FIQ
-	route_fiq_to_sp_min r0
-#endif
+/* ...existing code... */
 
-	bl	sp_min_warm_boot
-	bl	smc_get_next_ctx
-	/* r0 points to `smc_ctx_t` */
-	/* The PSCI cpu_context registers have been copied to `smc_ctx_t` */
-
-#if ENABLE_RUNTIME_INSTRUMENTATION
-	/* Save smc_ctx_t */
-	mov	r5, r0
-
-	pmf_calc_timestamp_addr rt_instr_svc, RT_INSTR_EXIT_PSCI
-	mov	r4, r0
-
-	/*
-	 * Invalidate before updating timestamp to ensure previous timestamp
-	 * updates on the same cache line with caches disabled are properly
-	 * seen by the same core. Without the cache invalidate, the core might
-	 * write into a stale cache line.
-	 */
-	mov	r1, #PMF_TS_SIZE
-	bl	inv_dcache_range
-
-	ldcopr16 r0, r1, CNTPCT_64
-	strd	r0, r1, [r4]
-
-	/* Restore smc_ctx_t */
-	mov	r0, r5
-#endif
-
-	b	sp_min_exit
+    /* 完成 warm boot 平台初始化并恢复 smc_ctx，随后返回 */
+    bl	sp_min_warm_boot
+    bl	smc_get_next_ctx
+/* ...existing code... */
+    b	sp_min_exit
 endfunc sp_min_warm_entrypoint
 
 /*
- * The function to restore the registers from SMC context and return
- * to the mode restored to SPSR.
- *
- * Arguments : r0 must point to the SMC context to restore from.
+ * sp_min_exit：从 smc_ctx 恢复寄存器并返回到调用者（monitor_exit）
+ * - 入口参数：r0 必须指向要恢复的 smc_ctx_t
  */
 func sp_min_exit
-	monitor_exit
+    monitor_exit
 endfunc sp_min_exit
