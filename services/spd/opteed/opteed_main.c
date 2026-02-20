@@ -1,18 +1,14 @@
 /*
- * Copyright (c) 2013-2025, Arm Limited and Contributors. All rights reserved.
+ * 版权所有 (c) 2013-2025, Arm Limited 及其贡献者。保留所有权利。
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
-
 /*******************************************************************************
- * This is the Secure Payload Dispatcher (SPD). The dispatcher is meant to be a
- * plug-in component to the Secure Monitor, registered as a runtime service. The
- * SPD is expected to be a functional extension of the Secure Payload (SP) that
- * executes in Secure EL1. The Secure Monitor will delegate all SMCs targeting
- * the Trusted OS/Applications range to the dispatcher. The SPD will either
- * handle the request locally or delegate it to the Secure Payload. It is also
- * responsible for initialising and maintaining communication with the SP.
+ * 这是安全负载调度器(SPD)。该调度器旨在作为安全监视器的插件组件注册为运行时服务。
+ * SPD 被期望作为在安全 EL1 中执行的安全负载(SP)的功能扩展。安全监视器将把所有针对
+ * 受信任操作系统/应用程序范围的 SMC 委托给调度器。SPD 将要么本地处理请求，
+ * 要么将其委托给安全负载。它还负责初始化和维护与 SP 的通信。
  ******************************************************************************/
 #include <assert.h>
 #include <errno.h>
@@ -33,8 +29,9 @@
 #include <lib/xlat_tables/xlat_tables_v2.h>
 #if OPTEE_ALLOW_SMC_LOAD
 #include <libfdt.h>
-#endif  /* OPTEE_ALLOW_SMC_LOAD */
+#endif /* OPTEE_ALLOW_SMC_LOAD */
 #include <plat/common/platform.h>
+
 #include <services/oem/chromeos/widevine_smc_handlers.h>
 #include <tools_share/uuid.h>
 
@@ -46,23 +43,21 @@ static struct transfer_list_header __maybe_unused *bl31_tl;
 #endif
 
 /*******************************************************************************
- * Address of the entrypoint vector table in OPTEE. It is
- * initialised once on the primary core after a cold boot.
+ * OPTEE 中入口向量表的地址。它在冷启动后在主核上初始化一次。
  ******************************************************************************/
 struct optee_vectors *optee_vector_table;
 
 /*******************************************************************************
- * Array to keep track of per-cpu OPTEE state
+ * 用于跟踪每个 CPU 的 OPTEE 状态的数组
  ******************************************************************************/
 optee_context_t opteed_sp_context[OPTEED_CORE_COUNT];
 uint32_t opteed_rw;
 
 #if OPTEE_ALLOW_SMC_LOAD
 static bool opteed_allow_load;
-/* OP-TEE image loading service UUID */
-DEFINE_SVC_UUID2(optee_image_load_uuid,
-	0xb1eafba3, 0x5d31, 0x4612, 0xb9, 0x06,
-	0xc4, 0xc7, 0xa4, 0xbe, 0x3c, 0xc0);
+/* OP-TEE 镜像加载服务 UUID */
+DEFINE_SVC_UUID2(optee_image_load_uuid, 0xb1eafba3, 0x5d31, 0x4612, 0xb9, 0x06,
+		 0xc4, 0xc7, 0xa4, 0xbe, 0x3c, 0xc0);
 
 static uint64_t dual32to64(uint32_t high, uint32_t low)
 {
@@ -76,35 +71,32 @@ static uint8_t fdt_buf[OPTEED_FDT_SIZE] __aligned(CACHE_WRITEBACK_GRANULE);
 static int32_t opteed_init(void);
 #endif
 /*******************************************************************************
- * This function is the handler registered for S-EL1 interrupts by the
- * OPTEED. It validates the interrupt and upon success arranges entry into
- * the OPTEE at 'optee_fiq_entry()' for handling the interrupt.
+ * 这个函数是由 OPTEED 为 S-EL1 中断注册的处理程序。它验证中断并在成功时安排进入
+ * OPTEE 的 'optee_fiq_entry()' 来处理中断。
  ******************************************************************************/
-static uint64_t opteed_sel1_interrupt_handler(uint32_t id,
-					    uint32_t flags,
-					    void *handle,
-					    void *cookie)
+static uint64_t opteed_sel1_interrupt_handler(uint32_t id, uint32_t flags,
+					      void *handle, void *cookie)
 {
 	uint32_t linear_id;
 	optee_context_t *optee_ctx;
 
 #if OPTEE_ALLOW_SMC_LOAD
 	if (optee_vector_table == NULL) {
-		/* OPTEE is not loaded yet, ignore this interrupt */
+		/* OPTEE 尚未加载，忽略此中断 */
 		SMC_RET0(handle);
 	}
 #endif
 
-	/* Check the security state when the exception was generated */
+	/* 检查生成异常时的安全状态 */
 	assert(get_interrupt_src_ss(flags) == NON_SECURE);
 
-	/* Sanity check the pointer to this cpu's context */
+	/* 对指向此 CPU 上下文的指针进行健全性检查 */
 	assert(handle == cm_get_context(NON_SECURE));
 
-	/* Save the non-secure context before entering the OPTEE */
+	/* 在进入 OPTEE 之前保存非安全上下文 */
 	cm_el1_sysregs_context_save(NON_SECURE);
 
-	/* Get a reference to this cpu's OPTEE context */
+	/* 获取对此 CPU 的 OPTEE 上下文的引用 */
 	linear_id = plat_my_core_pos();
 	optee_ctx = &opteed_sp_context[linear_id];
 	assert(&optee_ctx->cpu_ctx == cm_get_context(SECURE));
@@ -114,18 +106,16 @@ static uint64_t opteed_sel1_interrupt_handler(uint32_t id,
 	cm_set_next_eret_context(SECURE);
 
 	/*
-	 * Tell the OPTEE that it has to handle an FIQ (synchronously).
-	 * Also the instruction in normal world where the interrupt was
-	 * generated is passed for debugging purposes. It is safe to
-	 * retrieve this address from ELR_EL3 as the secure context will
-	 * not take effect until el3_exit().
+	 * 告诉 OPTEE 它必须处理一个 FIQ（同步地）。
+	 * 同时传递在正常世界中生成中断的指令以用于调试目的。
+	 * 从 ELR_EL3 检索此地址是安全的，因为安全上下文在 el3_exit() 之前不会生效。
 	 */
 	SMC_RET1(&optee_ctx->cpu_ctx, read_elr_el3());
 }
 
 /*
- * Registers an interrupt handler for S-EL1 interrupts when generated during
- * code executing in the non-secure state. Panics if it fails to do so.
+ * 为在非安全状态下执行的代码生成 S-EL1 中断时注册中断处理程序。
+ * 如果注册失败则会发生恐慌。
  */
 static void register_opteed_interrupt_handler(void)
 {
@@ -134,26 +124,23 @@ static void register_opteed_interrupt_handler(void)
 
 	flags = 0;
 	set_interrupt_rm_flag(flags, NON_SECURE);
-	rc = register_interrupt_type_handler(INTR_TYPE_S_EL1,
-			opteed_sel1_interrupt_handler,
-			flags);
+	rc = register_interrupt_type_handler(
+		INTR_TYPE_S_EL1, opteed_sel1_interrupt_handler, flags);
 	if (rc)
 		panic();
 }
 
 /*******************************************************************************
- * OPTEE Dispatcher setup. The OPTEED finds out the OPTEE entrypoint and type
- * (aarch32/aarch64) if not already known and initialises the context for entry
- * into OPTEE for its initialization.
+ * OPTEE 调度器设置。OPTEED 找出 OPTEE 入口点和类型（aarch32/aarch64）
+ * （如果尚未知道）并初始化进入 OPTEE 进行初始化的上下文。
  ******************************************************************************/
 static int32_t opteed_setup(void)
 {
 #if OPTEE_ALLOW_SMC_LOAD
 	opteed_allow_load = true;
-	INFO("Delaying OP-TEE setup until we receive an SMC call to load it\n");
+	INFO("延迟 OP-TEE 设置直到我们收到加载它的 SMC 调用\n");
 	/*
-	 * We must register the interrupt handler now so that the interrupt
-	 * priorities are not changed after starting the linux kernel.
+	 * 我们现在必须注册中断处理程序，这样在启动 Linux 内核后就不会改变中断优先级。
 	 */
 	register_opteed_interrupt_handler();
 	return 0;
@@ -171,22 +158,19 @@ static int32_t opteed_setup(void)
 	linear_id = plat_my_core_pos();
 
 	/*
-	 * Get information about the Secure Payload (BL32) image. Its
-	 * absence is a critical failure.  TODO: Add support to
-	 * conditionally include the SPD service
+	 * 获取关于安全负载(BL32)镜像的信息。它的缺失是致命故障。
+	 * TODO: 添加支持以有条件地包含 SPD 服务
 	 */
 	optee_ep_info = bl31_plat_get_next_image_ep_info(SECURE);
 	if (optee_ep_info == NULL) {
-		WARN("No OPTEE provided by BL2 boot loader, Booting device"
-			" without OPTEE initialization. SMC`s destined for OPTEE"
-			" will return SMC_UNK\n");
+		WARN("BL2 引导加载程序未提供 OPTEE，正在无 OPTEE 初始化的情况下引导设备。"
+		     "针对 OPTEE 的 SMC 将返回 SMC_UNK\n");
 		return 1;
 	}
 
 	/*
-	 * If there's no valid entry point for SP, we return a non-zero value
-	 * signalling failure initializing the service. We bail out without
-	 * registering any handlers
+	 * 如果 SP 没有有效的入口点，我们返回一个非零值表示初始化服务失败。
+	 * 我们在不注册任何处理程序的情况下退出
 	 */
 	if (optee_ep_info->pc == 0U) {
 		return 1;
@@ -224,7 +208,7 @@ static int32_t opteed_setup(void)
 	} else
 #endif /* TRANSFER_LIST */
 	{
-		/* Default handoff arguments */
+		/* 默认移交参数 */
 		opteed_rw = optee_ep_info->args.arg0;
 		arg0 = optee_ep_info->args.arg1; /* opteed_pageable_part */
 		arg1 = optee_ep_info->args.arg2; /* opteed_mem_limit */
@@ -232,29 +216,25 @@ static int32_t opteed_setup(void)
 		arg3 = 0;
 	}
 
-	opteed_init_optee_ep_state(optee_ep_info, opteed_rw,
-				   optee_ep_info->pc, arg0, arg1, arg2,
-				   arg3, &opteed_sp_context[linear_id]);
+	opteed_init_optee_ep_state(optee_ep_info, opteed_rw, optee_ep_info->pc,
+				   arg0, arg1, arg2, arg3,
+				   &opteed_sp_context[linear_id]);
 
 	/*
-	 * All OPTEED initialization done. Now register our init function with
-	 * BL31 for deferred invocation
+	 * 所有 OPTEED 初始化完成。现在向 BL31 注册我们的初始化函数以进行延迟调用
 	 */
 	bl31_register_bl32_init(&opteed_init);
 
 	return 0;
-#endif  /* OPTEE_ALLOW_SMC_LOAD */
+#endif /* OPTEE_ALLOW_SMC_LOAD */
 }
 
 /*******************************************************************************
- * This function passes control to the OPTEE image (BL32) for the first time
- * on the primary cpu after a cold boot. It assumes that a valid secure
- * context has already been created by opteed_setup() which can be directly
- * used.  It also assumes that a valid non-secure context has been
- * initialised by PSCI so it does not need to save and restore any
- * non-secure state. This function performs a synchronous entry into
- * OPTEE. OPTEE passes control back to this routine through a SMC. This returns
- * a non-zero value on success and zero on failure.
+ * 此函数在冷启动后首次将控制权传递给 OPTEE 镜像(BL32)到主 CPU。
+ * 它假定 opteed_setup() 已经创建了一个有效的安全上下文，可以直接使用。
+ * 它还假定 PSCI 已经初始化了一个有效的非安全上下文，因此不需要保存和恢复任何
+ * 非安全状态。此函数执行同步进入 OPTEE。OPTEE 通过 SMC 将控制权传回此例程。
+ * 成功时返回非零值，失败时返回零。
  ******************************************************************************/
 static int32_t
 opteed_init_with_entry_point(entry_point_info_t *optee_entry_point)
@@ -267,8 +247,7 @@ opteed_init_with_entry_point(entry_point_info_t *optee_entry_point)
 	cm_init_my_context(optee_entry_point);
 
 	/*
-	 * Arrange for an entry into OPTEE. It will be returned via
-	 * OPTEE_ENTRY_DONE case
+	 * 安排进入 OPTEE。它将通过 OPTEE_ENTRY_DONE 情况返回
 	 */
 	rc = opteed_synchronous_sp_entry(optee_ctx);
 	assert(rc != 0);
@@ -281,20 +260,18 @@ static int32_t opteed_init(void)
 {
 	entry_point_info_t *optee_entry_point;
 	/*
-	 * Get information about the OP-TEE (BL32) image. Its
-	 * absence is a critical failure.
+	 * 获取关于 OP-TEE(BL32)镜像的信息。它的缺失是致命故障。
 	 */
 	optee_entry_point = bl31_plat_get_next_image_ep_info(SECURE);
 	return opteed_init_with_entry_point(optee_entry_point);
 }
-#endif  /* !OPTEE_ALLOW_SMC_LOAD */
+#endif /* !OPTEE_ALLOW_SMC_LOAD */
 
 #if OPTEE_ALLOW_SMC_LOAD
 #if COREBOOT
 /*
- * Adds a firmware/coreboot node with the coreboot table information to a device
- * tree. Returns zero on success or if there is no coreboot table information;
- * failure code otherwise.
+ * 向设备树添加带有 coreboot 表信息的固件/coreboot 节点。
+ * 成功或没有 coreboot 表信息时返回零；否则返回错误代码。
  */
 static int add_coreboot_node(void *fdt)
 {
@@ -307,7 +284,7 @@ static int add_coreboot_node(void *fdt)
 	} reg_node;
 	coreboot_get_table_location(&coreboot_table_addr, &coreboot_table_size);
 	if (!coreboot_table_addr || !coreboot_table_size) {
-		WARN("Unable to get coreboot table location for device tree");
+		WARN("无法获取设备树的 coreboot 表位置");
 		return 0;
 	}
 	ret = fdt_begin_node(fdt, "firmware");
@@ -329,7 +306,7 @@ static int add_coreboot_node(void *fdt)
 	reg_node.addr = cpu_to_fdt64(coreboot_table_addr);
 	reg_node.size = cpu_to_fdt32(coreboot_table_size);
 	ret = fdt_property(fdt, "reg", &reg_node,
-				sizeof(uint64_t) + sizeof(uint32_t));
+			   sizeof(uint64_t) + sizeof(uint32_t));
 	if (ret)
 		return ret;
 
@@ -343,9 +320,8 @@ static int add_coreboot_node(void *fdt)
 
 #if CROS_WIDEVINE_SMC
 /*
- * Adds a options/widevine node with the widevine table information to a device
- * tree. Returns zero on success or if there is no widevine table information;
- * failure code otherwise.
+ * 向设备树添加带有 widevine 表信息的选项/widevine 节点。
+ * 成功或没有 widevine 表信息时返回零；否则返回错误代码。
  */
 static int add_options_widevine_node(void *fdt)
 {
@@ -379,7 +355,8 @@ static int add_options_widevine_node(void *fdt)
 	}
 
 	if (cros_oem_rot.length) {
-		ret = fdt_property(fdt, "google,widevine-root-of-trust-ecc-p256",
+		ret = fdt_property(fdt,
+				   "google,widevine-root-of-trust-ecc-p256",
 				   cros_oem_rot.buffer, cros_oem_rot.length);
 		if (ret)
 			return ret;
@@ -398,9 +375,8 @@ static int add_options_widevine_node(void *fdt)
 #endif /* CROS_WIDEVINE_SMC */
 
 /*
- * Creates a device tree for passing into OP-TEE. Currently is populated with
- * the coreboot table address.
- * Returns 0 on success, error code otherwise.
+ * 创建用于传递给 OP-TEE 的设备树。目前填充了 coreboot 表地址。
+ * 成功时返回 0，否则返回错误代码。
  */
 static int create_opteed_dt(void)
 {
@@ -441,10 +417,10 @@ static int create_opteed_dt(void)
 static int32_t create_smc_tl(const void *fdt, uint32_t fdt_sz)
 {
 	bl31_tl = transfer_list_init((void *)(uintptr_t)FW_HANDOFF_BASE,
-				FW_HANDOFF_SIZE);
+				     FW_HANDOFF_SIZE);
 	if (!bl31_tl) {
-		ERROR("Failed to initialize Transfer List at 0x%lx\n",
-		(unsigned long)FW_HANDOFF_BASE);
+		ERROR("在 0x%lx 处初始化传输列表失败\n",
+		      (unsigned long)FW_HANDOFF_BASE);
 		return -1;
 	}
 
@@ -456,9 +432,8 @@ static int32_t create_smc_tl(const void *fdt, uint32_t fdt_sz)
 #endif
 
 /*******************************************************************************
- * This function is responsible for handling the SMC that loads the OP-TEE
- * binary image via a non-secure SMC call. It takes the size and physical
- * address of the payload as parameters.
+ * 此函数负责处理通过非安全 SMC 调用加载 OP-TEE 二进制镜像的 SMC。
+ * 它以负载的大小和物理地址作为参数。
  ******************************************************************************/
 static int32_t opteed_handle_smc_load(uint64_t data_size, uint64_t data_pa)
 {
@@ -489,8 +464,7 @@ static int32_t opteed_handle_smc_load(uint64_t data_size, uint64_t data_pa)
 	data_map_size = page_align(data_size + (mapped_data_pa - data_pa), UP);
 
 	/*
-	 * We do not validate the passed in address because we are trusting the
-	 * non-secure world at this point still.
+	 * 我们此时仍然信任非安全世界，因此不验证传入的地址。
 	 */
 	rc = mmap_add_dynamic_region(mapped_data_pa, mapped_data_va,
 				     data_map_size, MT_MEMORY | MT_RO | MT_NS);
@@ -506,7 +480,7 @@ static int32_t opteed_handle_smc_load(uint64_t data_size, uint64_t data_pa)
 	}
 
 	image_ptr = (uint8_t *)data_va + sizeof(optee_header_t) +
-			sizeof(optee_image_t);
+		    sizeof(optee_image_t);
 	if (image_header->arch == 1) {
 		opteed_rw = OPTEE_AARCH64;
 	} else {
@@ -514,12 +488,12 @@ static int32_t opteed_handle_smc_load(uint64_t data_size, uint64_t data_pa)
 	}
 
 	curr_image = &image_header->optee_image_list[0];
-	image_pa = dual32to64(curr_image->load_addr_hi,
-			      curr_image->load_addr_lo);
+	image_pa =
+		dual32to64(curr_image->load_addr_hi, curr_image->load_addr_lo);
 	image_va = image_pa;
 	target_end_pa = image_pa + curr_image->size;
 
-	/* Now also map the memory we want to copy it to. */
+	/* 现在也映射我们要复制到的内存。 */
 	target_pa = page_align(image_pa, DOWN);
 	target_va = target_pa;
 	target_size = page_align(target_end_pa, UP) - target_pa;
@@ -531,7 +505,7 @@ static int32_t opteed_handle_smc_load(uint64_t data_size, uint64_t data_pa)
 		return rc;
 	}
 
-	INFO("Loaded OP-TEE via SMC: size %d addr 0x%" PRIx64 "\n",
+	INFO("通过 SMC 加载 OP-TEE: 大小 %d 地址 0x%" PRIx64 "\n",
 	     curr_image->size, image_va);
 
 	memcpy((void *)image_va, image_ptr, curr_image->size);
@@ -540,12 +514,12 @@ static int32_t opteed_handle_smc_load(uint64_t data_size, uint64_t data_pa)
 	mmap_remove_dynamic_region(mapped_data_va, data_map_size);
 	mmap_remove_dynamic_region(target_va, target_size);
 
-	/* Save the non-secure state */
+	/* 保存非安全状态 */
 	cm_el1_sysregs_context_save(NON_SECURE);
 
 	rc = create_opteed_dt();
 	if (rc) {
-		ERROR("Failed device tree creation %d\n", rc);
+		ERROR("设备树创建失败 %d\n", rc);
 		return rc;
 	}
 	dt_addr = (uint64_t)fdt_buf;
@@ -561,11 +535,13 @@ static int32_t opteed_handle_smc_load(uint64_t data_size, uint64_t data_pa)
 
 		if (opteed_rw == OPTEE_AARCH64) {
 			arg0 = (uint64_t)dt;
-			arg1 = TRANSFER_LIST_HANDOFF_X1_VALUE(REGISTER_CONVENTION_VERSION);
+			arg1 = TRANSFER_LIST_HANDOFF_X1_VALUE(
+				REGISTER_CONVENTION_VERSION);
 			arg2 = 0;
 		} else {
 			arg0 = 0;
-			arg1 = TRANSFER_LIST_HANDOFF_R1_VALUE(REGISTER_CONVENTION_VERSION);
+			arg1 = TRANSFER_LIST_HANDOFF_R1_VALUE(
+				REGISTER_CONVENTION_VERSION);
 			arg2 = (uint64_t)dt;
 		}
 
@@ -573,67 +549,53 @@ static int32_t opteed_handle_smc_load(uint64_t data_size, uint64_t data_pa)
 	} else
 #endif /* TRANSFER_LIST */
 	{
-		/* Default handoff arguments */
+		/* 默认移交参数 */
 		arg2 = dt_addr;
 	}
 
-	opteed_init_optee_ep_state(&optee_ep_info,
-				   opteed_rw,
-				   image_pa,
-				   arg0,
-				   arg1,
-				   arg2,
-				   arg3,
+	opteed_init_optee_ep_state(&optee_ep_info, opteed_rw, image_pa, arg0,
+				   arg1, arg2, arg3,
 				   &opteed_sp_context[linear_id]);
 	if (opteed_init_with_entry_point(&optee_ep_info) == 0) {
 		rc = -EFAULT;
 	}
 
-	/* Restore non-secure state */
+	/* 恢复非安全状态 */
 	cm_el1_sysregs_context_restore(NON_SECURE);
 	cm_set_next_eret_context(NON_SECURE);
 
 	return rc;
 }
-#endif  /* OPTEE_ALLOW_SMC_LOAD */
+#endif /* OPTEE_ALLOW_SMC_LOAD */
 
 /*******************************************************************************
- * This function is responsible for handling all SMCs in the Trusted OS/App
- * range from the non-secure state as defined in the SMC Calling Convention
- * Document. It is also responsible for communicating with the Secure
- * payload to delegate work and return results back to the non-secure
- * state. Lastly it will also return any information that OPTEE needs to do
- * the work assigned to it.
+ * 此函数负责处理来自非安全状态的信任操作系统/应用程序范围内的所有 SMC，
+ * 如 SMC 调用约定文档中定义的那样。它还负责与安全负载通信以委派工作并将结果
+ * 返回到非安全状态。最后，它还将返回 OPTEE 完成分配给它的工作所需的所有信息。
  ******************************************************************************/
-static uintptr_t opteed_smc_handler(uint32_t smc_fid,
-			 u_register_t x1,
-			 u_register_t x2,
-			 u_register_t x3,
-			 u_register_t x4,
-			 void *cookie,
-			 void *handle,
-			 u_register_t flags)
+static uintptr_t opteed_smc_handler(uint32_t smc_fid, u_register_t x1,
+				    u_register_t x2, u_register_t x3,
+				    u_register_t x4, void *cookie, void *handle,
+				    u_register_t flags)
 {
 	cpu_context_t *ns_cpu_context;
 	uint32_t linear_id = plat_my_core_pos();
 	optee_context_t *optee_ctx = &opteed_sp_context[linear_id];
 
 	/*
-	 * Determine which security state this SMC originated from
+	 * 确定此 SMC 来自哪个安全状态
 	 */
 
 	if (is_caller_non_secure(flags)) {
 #if OPTEE_ALLOW_SMC_LOAD
 		if (opteed_allow_load && smc_fid == NSSMC_OPTEED_CALL_UID) {
-			/* Provide the UUID of the image loading service. */
+			/* 提供镜像加载服务的 UUID。 */
 			SMC_UUID_RET(handle, optee_image_load_uuid);
 		}
 		if (smc_fid == NSSMC_OPTEED_CALL_LOAD_IMAGE) {
 			/*
-			 * TODO: Consider wiping the code for SMC loading from
-			 * memory after it has been invoked similar to what is
-			 * done under RECLAIM_INIT, but extended to happen
-			 * later.
+			 * TODO: 考虑在调用后从内存中擦除 SMC 加载代码，
+			 * 类似于在 RECLAIM_INIT 下所做的，但扩展到稍后发生。
 			 */
 			if (!opteed_allow_load) {
 				SMC_RET1(handle, -EPERM);
@@ -644,32 +606,27 @@ static uintptr_t opteed_smc_handler(uint32_t smc_fid,
 			uint64_t data_pa = dual32to64(x3, x4);
 			if (!data_size || !data_pa) {
 				/*
-				 * This is invoked when the OP-TEE image didn't
-				 * load correctly in the kernel but we want to
-				 * block off loading of it later for security
-				 * reasons.
+				 * 当 OP-TEE 镜像在内核中未正确加载但我们想要
+				 * 出于安全原因阻止以后加载它时调用此函数。
 				 */
 				SMC_RET1(handle, -EINVAL);
 			}
-			SMC_RET1(handle, opteed_handle_smc_load(
-					data_size, data_pa));
+			SMC_RET1(handle,
+				 opteed_handle_smc_load(data_size, data_pa));
 		}
-#endif  /* OPTEE_ALLOW_SMC_LOAD */
+#endif /* OPTEE_ALLOW_SMC_LOAD */
 		/*
-		 * This is a fresh request from the non-secure client.
-		 * The parameters are in x1 and x2. Figure out which
-		 * registers need to be preserved, save the non-secure
-		 * state and send the request to the secure payload.
+		 * 这是非安全客户端的新请求。
+		 * 参数在 x1 和 x2 中。确定需要保留哪些寄存器，
+		 * 保存非安全状态并将请求发送到安全负载。
 		 */
 		assert(handle == cm_get_context(NON_SECURE));
 
 		cm_el1_sysregs_context_save(NON_SECURE);
 
 		/*
-		 * We are done stashing the non-secure context. Ask the
-		 * OP-TEE to do the work now. If we are loading vi an SMC,
-		 * then we also need to init this CPU context if not done
-		 * already.
+		 * 我们已完成存储非安全上下文。现在要求 OP-TEE 执行工作。
+		 * 如果我们通过 SMC 加载，则还需要初始化此 CPU 上下文（如果尚未完成）。
 		 */
 		if (optee_vector_table == NULL) {
 			SMC_RET1(handle, -EINVAL);
@@ -681,44 +638,38 @@ static uintptr_t opteed_smc_handler(uint32_t smc_fid,
 		}
 
 		/*
-		 * Verify if there is a valid context to use, copy the
-		 * operation type and parameters to the secure context
-		 * and jump to the fast smc entry point in the secure
-		 * payload. Entry into S-EL1 will take place upon exit
-		 * from this function.
+		 * 验证是否存在有效的上下文，将操作类型和参数复制到安全上下文，
+		 * 并跳转到安全负载中的快速 smc 入口点。从此函数退出时将进入 S-EL1。
 		 */
 		assert(&optee_ctx->cpu_ctx == cm_get_context(SECURE));
 
-		/* Set appropriate entry for SMC.
-		 * We expect OPTEE to manage the PSTATE.I and PSTATE.F
-		 * flags as appropriate.
+		/* 为 SMC 设置适当的入口。
+		 * 我们期望 OPTEE 适当地管理 PSTATE.I 和 PSTATE.F 标志。
 		 */
 		if (GET_SMC_TYPE(smc_fid) == SMC_TYPE_FAST) {
-			cm_set_elr_el3(SECURE, (uint64_t)
-					&optee_vector_table->fast_smc_entry);
+			cm_set_elr_el3(
+				SECURE,
+				(uint64_t)&optee_vector_table->fast_smc_entry);
 		} else {
-			cm_set_elr_el3(SECURE, (uint64_t)
-					&optee_vector_table->yield_smc_entry);
+			cm_set_elr_el3(
+				SECURE,
+				(uint64_t)&optee_vector_table->yield_smc_entry);
 		}
 
 		cm_el1_sysregs_context_restore(SECURE);
 		cm_set_next_eret_context(SECURE);
 
-		write_ctx_reg(get_gpregs_ctx(&optee_ctx->cpu_ctx),
-			      CTX_GPREG_X4,
+		write_ctx_reg(get_gpregs_ctx(&optee_ctx->cpu_ctx), CTX_GPREG_X4,
 			      read_ctx_reg(get_gpregs_ctx(handle),
 					   CTX_GPREG_X4));
-		write_ctx_reg(get_gpregs_ctx(&optee_ctx->cpu_ctx),
-			      CTX_GPREG_X5,
+		write_ctx_reg(get_gpregs_ctx(&optee_ctx->cpu_ctx), CTX_GPREG_X5,
 			      read_ctx_reg(get_gpregs_ctx(handle),
 					   CTX_GPREG_X5));
-		write_ctx_reg(get_gpregs_ctx(&optee_ctx->cpu_ctx),
-			      CTX_GPREG_X6,
+		write_ctx_reg(get_gpregs_ctx(&optee_ctx->cpu_ctx), CTX_GPREG_X6,
 			      read_ctx_reg(get_gpregs_ctx(handle),
 					   CTX_GPREG_X6));
-		/* Propagate hypervisor client ID */
-		write_ctx_reg(get_gpregs_ctx(&optee_ctx->cpu_ctx),
-			      CTX_GPREG_X7,
+		/* 传播虚拟机监控程序客户端 ID */
+		write_ctx_reg(get_gpregs_ctx(&optee_ctx->cpu_ctx), CTX_GPREG_X7,
 			      read_ctx_reg(get_gpregs_ctx(handle),
 					   CTX_GPREG_X7));
 
@@ -726,27 +677,26 @@ static uintptr_t opteed_smc_handler(uint32_t smc_fid,
 	}
 
 	/*
-	 * Returning from OPTEE
+	 * 从 OPTEE 返回
 	 */
 
 	switch (smc_fid) {
 	/*
-	 * OPTEE has finished initialising itself after a cold boot
+	 * OPTEE 在冷启动后完成了自身的初始化
 	 */
 	case TEESMC_OPTEED_RETURN_ENTRY_DONE:
 		/*
-		 * Stash the OPTEE entry points information. This is done
-		 * only once on the primary cpu
+		 * 存储 OPTEE 入口点信息。这仅在主 CPU 上执行一次
 		 */
 		assert(optee_vector_table == NULL);
-		optee_vector_table = (optee_vectors_t *) x1;
+		optee_vector_table = (optee_vectors_t *)x1;
 
 		if (optee_vector_table != NULL) {
 			set_optee_pstate(optee_ctx->state, OPTEE_PSTATE_ON);
 
 			/*
-			 * OPTEE has been successfully initialized.
-			 * Register power management hooks with PSCI
+			 * OPTEE 已成功初始化。
+			 * 向 PSCI 注册电源管理钩子
 			 */
 			psci_register_spd_pm_hook(&opteed_pm);
 
@@ -756,33 +706,24 @@ static uintptr_t opteed_smc_handler(uint32_t smc_fid,
 		}
 
 		/*
-		 * OPTEE reports completion. The OPTEED must have initiated
-		 * the original request through a synchronous entry into
-		 * OPTEE. Jump back to the original C runtime context.
+		 * OPTEE 报告完成。OPTEED 必须已通过同步进入 OPTEE 发起原始请求。
+		 * 跳回到原始的 C 运行时上下文。
 		 */
 		opteed_synchronous_sp_exit(optee_ctx, x1);
 		break;
 
-
 	/*
-	 * These function IDs is used only by OP-TEE to indicate it has
-	 * finished:
-	 * 1. turning itself on in response to an earlier psci
-	 *    cpu_on request
-	 * 2. resuming itself after an earlier psci cpu_suspend
-	 *    request.
+	 * 这些函数 ID 仅由 OP-TEE 使用，以表明它已完成：
+	 * 1. 响应早期 psci cpu_on 请求开启自身
+	 * 2. 在早期 psci cpu_suspend 请求后恢复自身
 	 */
 	case TEESMC_OPTEED_RETURN_ON_DONE:
 	case TEESMC_OPTEED_RETURN_RESUME_DONE:
 
-
 	/*
-	 * These function IDs is used only by the SP to indicate it has
-	 * finished:
-	 * 1. suspending itself after an earlier psci cpu_suspend
-	 *    request.
-	 * 2. turning itself off in response to an earlier psci
-	 *    cpu_off request.
+	 * 这些函数 ID 仅由 SP 使用，以表明它已完成：
+	 * 1. 在早期 psci cpu_suspend 请求后暂停自身
+	 * 2. 响应早期 psci cpu_off 请求关闭自身
 	 */
 	case TEESMC_OPTEED_RETURN_OFF_DONE:
 	case TEESMC_OPTEED_RETURN_SUSPEND_DONE:
@@ -790,80 +731,63 @@ static uintptr_t opteed_smc_handler(uint32_t smc_fid,
 	case TEESMC_OPTEED_RETURN_SYSTEM_RESET_DONE:
 
 		/*
-		 * OPTEE reports completion. The OPTEED must have initiated the
-		 * original request through a synchronous entry into OPTEE.
-		 * Jump back to the original C runtime context, and pass x1 as
-		 * return value to the caller
+		 * OPTEE 报告完成。OPTEED 必须已通过同步进入 OPTEE 发起原始请求。
+		 * 跳回到原始的 C 运行时上下文，并将 x1 作为返回值传递给调用者
 		 */
 		opteed_synchronous_sp_exit(optee_ctx, x1);
 		break;
 
 	/*
-	 * OPTEE is returning from a call or being preempted from a call, in
-	 * either case execution should resume in the normal world.
+	 * OPTEE 正在从调用返回或从中断调用，无论哪种情况都应在正常世界中恢复执行。
 	 */
 	case TEESMC_OPTEED_RETURN_CALL_DONE:
 		/*
-		 * This is the result from the secure client of an
-		 * earlier request. The results are in x0-x3. Copy it
-		 * into the non-secure context, save the secure state
-		 * and return to the non-secure state.
+		 * 这是来自早期请求的安全客户端的结果。结果在 x0-x3 中。
+		 * 将其复制到非安全上下文，保存安全状态并返回到非安全状态。
 		 */
 		assert(handle == cm_get_context(SECURE));
 		cm_el1_sysregs_context_save(SECURE);
 
-		/* Get a reference to the non-secure context */
+		/* 获取对非安全上下文的引用 */
 		ns_cpu_context = cm_get_context(NON_SECURE);
 		assert(ns_cpu_context);
 
-		/* Restore non-secure state */
+		/* 恢复非安全状态 */
 		cm_el1_sysregs_context_restore(NON_SECURE);
 		cm_set_next_eret_context(NON_SECURE);
 
 		SMC_RET4(ns_cpu_context, x1, x2, x3, x4);
 
 	/*
-	 * OPTEE has finished handling a S-EL1 FIQ interrupt. Execution
-	 * should resume in the normal world.
+	 * OPTEE 已完成处理 S-EL1 FIQ 中断。应在正常世界中恢复执行。
 	 */
 	case TEESMC_OPTEED_RETURN_FIQ_DONE:
-		/* Get a reference to the non-secure context */
+		/* 获取对非安全上下文的引用 */
 		ns_cpu_context = cm_get_context(NON_SECURE);
 		assert(ns_cpu_context);
 
 		/*
-		 * Restore non-secure state. There is no need to save the
-		 * secure system register context since OPTEE was supposed
-		 * to preserve it during S-EL1 interrupt handling.
+		 * 恢复非安全状态。由于 OPTEE 在处理 S-EL1 中断期间应该保留它，
+		 * 因此无需保存安全系统寄存器上下文。
 		 */
 		cm_el1_sysregs_context_restore(NON_SECURE);
 		cm_set_next_eret_context(NON_SECURE);
 
-		SMC_RET0((uint64_t) ns_cpu_context);
+		SMC_RET0((uint64_t)ns_cpu_context);
 
 	default:
 		panic();
 	}
 }
 
-/* Define an OPTEED runtime service descriptor for fast SMC calls */
-DECLARE_RT_SVC(
-	opteed_fast,
+/* 为快速 SMC 调用定义 OPTEED 运行时服务描述符 */
+DECLARE_RT_SVC(opteed_fast,
 
-	OEN_TOS_START,
-	OEN_TOS_END,
-	SMC_TYPE_FAST,
-	opteed_setup,
-	opteed_smc_handler
-);
+	       OEN_TOS_START, OEN_TOS_END, SMC_TYPE_FAST, opteed_setup,
+	       opteed_smc_handler);
 
-/* Define an OPTEED runtime service descriptor for yielding SMC calls */
-DECLARE_RT_SVC(
-	opteed_std,
+/* 为可中断 SMC 调用定义 OPTEED 运行时服务描述符 */
+DECLARE_RT_SVC(opteed_std,
 
-	OEN_TOS_START,
-	OEN_TOS_END,
-	SMC_TYPE_YIELD,
-	NULL,
-	opteed_smc_handler
-);
+	       OEN_TOS_START, OEN_TOS_END, SMC_TYPE_YIELD, NULL,
+	       opteed_smc_handler);
